@@ -1,11 +1,37 @@
 #include <algorithm>
 #include <bitset>
+#include <chrono>
 #include <iostream>
 #include <set>
 #include <string>
 #include <unordered_map>
 #include <vector>
+
 #pragma GCC optimize(2)
+
+class Timer {
+public:
+  void start() { start_time = std::chrono::high_resolution_clock::now(); }
+
+  void stop() {
+    auto end_time = std::chrono::high_resolution_clock::now();
+    totduration += std::chrono::duration_cast<std::chrono::nanoseconds>(
+                       end_time - start_time)
+                       .count();
+  }
+
+  double duration() const {
+    return static_cast<double>(totduration) *
+           std::chrono::nanoseconds::period::num /
+           std::chrono::nanoseconds::period::den;
+  }
+
+  void show() const { std::cout << " took " << duration() << " seconds\n"; }
+
+private:
+  std::chrono::time_point<std::chrono::high_resolution_clock> start_time;
+  long totduration = 0;
+};
 
 struct Team_Info {
   std::string name;
@@ -48,6 +74,7 @@ struct Team_Data {
   std::bitset<26> actual_solved; // not affected by frozen
   int frozen_attempt[26] = {0};
   int wrong_submission[26] = {0};
+  bool submission_need_flush = false;
 };
 
 std::vector<Team_Data> team_data;
@@ -56,6 +83,7 @@ std::vector<std::string> team_rank;
 bool isStarted = false;
 bool isFrozen = false;
 int problem_num, duration;
+bool need_flush = true;
 
 struct comp {
   bool operator()(const Team_Set &a, const Team_Set &b) const {
@@ -69,19 +97,18 @@ struct comp {
       return data_a.penalty_time < data_b.penalty_time;
     }
 
-    std::vector<int> times_a = data_a.team_time;
-    std::vector<int> times_b = data_b.team_time;
-    std::sort(times_a.begin(), times_a.end());
-    std::sort(times_b.begin(), times_b.end());
-
-    for (int i = times_a.size() - 1; i >= 0; i--) {
-      if (times_a[i] != times_b[i]) {
-        return times_a[i] < times_b[i];
+    for (int i = data_a.team_time.size() - 1; i >= 0; i--) {
+      if (data_a.team_time[i] != data_b.team_time[i]) {
+        return data_a.team_time[i] < data_b.team_time[i];
       }
     }
     return a.name < b.name;
   }
 };
+
+std::set<Team_Set, comp> team_set;
+
+// <---------------------- Begin of Functions ---------------------->
 
 int CalculateProblemTime(int problem_idx,
                          const std::vector<Submission> &submissions) {
@@ -110,6 +137,17 @@ void AddTeam() {
     team_map[name] = {name, idx};
     std::cout << "[Info]Add successfully.\n";
   }
+}
+
+void AddTeamTime(const std::string &team_name, int time) {
+  auto &teamtime = team_data[team_map[team_name].data_idx].team_time;
+  for (int i = teamtime.size() - 1; i >= 0; i--) {
+    if (time > teamtime[i]) {
+      teamtime.insert(teamtime.begin() + i + 1, time);
+      return;
+    }
+  }
+  teamtime.insert(teamtime.begin(), time);
 }
 
 void PrintScoreboard() {
@@ -186,15 +224,35 @@ void PrintScoreboard() {
 }
 
 void Flush() {
-  std::set<Team_Set, comp> temp_set;
-  for (const auto &team_info : team_map) {
-    temp_set.insert({team_info.first, team_info.second.data_idx});
+  if (!need_flush) {
+    return;
   }
+  
+  team_set.clear();
+  for (const auto &team : team_map) {
+    team_set.insert({team.first, team.second.data_idx});
+  }
+  
+  /*if (team_set.empty()) {
+    for (const auto &team : team_map) {
+      team_set.insert({team.first, team.second.data_idx});
+    }
+  } else {
+    for (const auto &team : team_map) {
+      if (team_data[team.second.data_idx].submission_need_flush) {
+        team_set.erase({team.first, team.second.data_idx});
+        team_set.insert({team.first, team.second.data_idx});
+        team_data[team.second.data_idx].submission_need_flush = false;
+      }
+    }
+  }*/
 
   team_rank.clear();
-  for (const auto &team : temp_set) {
+  for (const auto &team : team_set) {
     team_rank.push_back(team.name);
   }
+
+  need_flush = false;
 }
 
 void Submit() {
@@ -230,8 +288,10 @@ void Submit() {
       int problem_penalty_time =
           CalculateProblemTime(problem_idx, team.team_submission);
       team.penalty_time += problem_penalty_time;
-      team.team_time.push_back(time);
+      AddTeamTime(team_name, time);
       team.solved[problem_idx] = true;
+      need_flush = true;
+      team.submission_need_flush = true;
     } else {
       team.wrong_submission[problem_idx]++;
     }
@@ -245,15 +305,13 @@ void Scroll() {
   }
 
   std::cout << "[Info]Scroll scoreboard.\n";
+
   Flush();
+  std::set<Team_Set, comp> temp_set = team_set;
+
   PrintScoreboard();
 
   int idx = team_rank.size() - 1;
-
-  std::set<Team_Set, comp> temp_set;
-  for (const auto &team_info : team_map) {
-    temp_set.insert({team_info.first, team_info.second.data_idx});
-  }
 
   while (idx >= 0) {
     std::string current_team_name = team_rank[idx];
@@ -277,12 +335,13 @@ void Scroll() {
       int problem_penalty_time =
           CalculateProblemTime(sub.problem_idx, team.team_submission);
       team.penalty_time += problem_penalty_time;
-      team.team_time.push_back(sub.time);
+      AddTeamTime(current_team_name, sub.time);
       team.solved[sub.problem_idx] = true;
 
       std::vector<std::string> prev_team_rank = team_rank;
       team_rank.clear();
-      temp_set.insert({current_team_name, team_map[current_team_name].data_idx});
+      temp_set.insert(
+          {current_team_name, team_map[current_team_name].data_idx});
 
       int new_rank = -1;
 
@@ -309,6 +368,7 @@ void Scroll() {
   }
   isFrozen = false;
   PrintScoreboard();
+  need_flush = false;
 }
 
 void QueryRanking() {
@@ -367,11 +427,14 @@ void QuerySubmission() {
 }
 
 int main() {
+  Timer timer;
+  timer.start();
+
   std::ios::sync_with_stdio(false);
   std::cin.tie(NULL);
   std::cout.tie(NULL);
 
-  freopen("pressure_data/bigger.in", "r", stdin);
+  freopen("pressure_data/big.in", "r", stdin);
   freopen("output.txt", "w", stdout);
 
   std::string op;
@@ -401,6 +464,7 @@ int main() {
         std::cin >> temp >> duration >> temp >> problem_num;
         isStarted = true;
         Flush();
+        need_flush = false;
         std::cout << "[Info]Competition starts.\n";
       }
     } else if (op == "SUBMIT") {
@@ -416,5 +480,7 @@ int main() {
       QuerySubmission();
     }
   }
+  timer.stop();
+  timer.show();
   return 0;
 }
