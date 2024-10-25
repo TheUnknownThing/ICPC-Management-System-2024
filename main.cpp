@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <bitset>
 #include <iostream>
 #include <set>
 #include <string>
@@ -39,12 +40,12 @@ struct FrozenSubmissionComp {
 };
 
 struct Team_Data {
-  std::set<int> team_time;
+  std::vector<int> team_time;
   std::vector<Submission> team_submission;
   std::multiset<Submission, FrozenSubmissionComp> frozen_submission;
   int penalty_time;
-  std::vector<int> solved;
-  std::vector<int> actual_solved; // not affected by frozen
+  std::bitset<26> solved;
+  std::bitset<26> actual_solved; // not affected by frozen
   int frozen_attempt[26] = {0};
   int wrong_submission[26] = {0};
 };
@@ -61,17 +62,21 @@ struct comp {
     const Team_Data &data_a = team_data[a.data_idx];
     const Team_Data &data_b = team_data[b.data_idx];
 
-    if (data_a.solved.size() != data_b.solved.size()) {
-      return data_a.solved.size() > data_b.solved.size();
+    if (data_a.solved.count() != data_b.solved.count()) {
+      return data_a.solved.count() > data_b.solved.count();
     }
     if (data_a.penalty_time != data_b.penalty_time) {
       return data_a.penalty_time < data_b.penalty_time;
     }
-    for (auto it1 = data_a.team_time.end(), it2 = data_b.team_time.end();
-         it1 != data_a.team_time.begin() && it2 != data_b.team_time.begin();
-         it1--, it2--) {
-      if (*it1 != *it2) {
-        return *it1 < *it2;
+
+    std::vector<int> times_a = data_a.team_time;
+    std::vector<int> times_b = data_b.team_time;
+    std::sort(times_a.begin(), times_a.end());
+    std::sort(times_b.begin(), times_b.end());
+
+    for (int i = times_a.size() - 1; i >= 0; i--) {
+      if (times_a[i] != times_b[i]) {
+        return times_a[i] < times_b[i];
       }
     }
     return a.name < b.name;
@@ -111,15 +116,12 @@ void PrintScoreboard() {
   // team_name rank solved_num penalty_time information_of_each_problem
   for (int i = 0; i < team_rank.size(); i++) {
     std::cout << team_rank[i] << " " << i + 1 << " "
-              << team_data[team_map[team_rank[i]].data_idx].solved.size() << " "
-              << team_data[team_map[team_rank[i]].data_idx].penalty_time << " ";
+              << team_data[team_map[team_rank[i]].data_idx].solved.count()
+              << " " << team_data[team_map[team_rank[i]].data_idx].penalty_time
+              << " ";
 
     for (int j = 0; j < problem_num; j++) {
-      bool isSolved =
-          std::find(team_data[team_map[team_rank[i]].data_idx].solved.begin(),
-                    team_data[team_map[team_rank[i]].data_idx].solved.end(),
-                    j) !=
-          team_data[team_map[team_rank[i]].data_idx].solved.end();
+      bool isSolved = team_data[team_map[team_rank[i]].data_idx].solved[j];
       if (team_data[team_map[team_rank[i]].data_idx].wrong_submission[j] == 0 &&
           !isSolved &&
           !team_data[team_map[team_rank[i]].data_idx].frozen_attempt[j] != 0) {
@@ -160,10 +162,7 @@ void PrintScoreboard() {
                 << " ";
           }
         } else {
-          if (std::find(
-                  team_data[team_map[team_rank[i]].data_idx].solved.begin(),
-                  team_data[team_map[team_rank[i]].data_idx].solved.end(), j) !=
-              team_data[team_map[team_rank[i]].data_idx].solved.end()) {
+          if (isSolved) {
             std::cout << "+"
                       << team_data[team_map[team_rank[i]].data_idx]
                              .wrong_submission[j]
@@ -212,8 +211,7 @@ void Submit() {
 
   team.team_submission.push_back(new_submission);
 
-  if (std::find(team.actual_solved.begin(), team.actual_solved.end(),
-                problem_idx) != team.actual_solved.end()) {
+  if (team.actual_solved[problem_idx]) {
     if (isFrozen) {
       team.frozen_attempt[problem_idx]++;
     }
@@ -221,7 +219,7 @@ void Submit() {
   }
 
   if (submit_stat == "Accepted") {
-    team.actual_solved.push_back(problem_idx);
+    team.actual_solved[problem_idx] = true;
   }
 
   if (isFrozen) {
@@ -232,8 +230,8 @@ void Submit() {
       int problem_penalty_time =
           CalculateProblemTime(problem_idx, team.team_submission);
       team.penalty_time += problem_penalty_time;
-      team.team_time.insert(problem_penalty_time);
-      team.solved.push_back(problem_idx);
+      team.team_time.push_back(time);
+      team.solved[problem_idx] = true;
     } else {
       team.wrong_submission[problem_idx]++;
     }
@@ -251,8 +249,15 @@ void Scroll() {
   PrintScoreboard();
 
   int idx = team_rank.size() - 1;
+
+  std::set<Team_Set, comp> temp_set;
+  for (const auto &team_info : team_map) {
+    temp_set.insert({team_info.first, team_info.second.data_idx});
+  }
+
   while (idx >= 0) {
-    auto &team = team_data[team_map[team_rank[idx]].data_idx];
+    std::string current_team_name = team_rank[idx];
+    auto &team = team_data[team_map[current_team_name].data_idx];
 
     if (team.frozen_submission.empty()) {
       idx--;
@@ -263,28 +268,34 @@ void Scroll() {
     Submission sub = *it;
     team.frozen_submission.erase(it);
 
-    if (std::find(team.solved.begin(), team.solved.end(), sub.problem_idx) !=
-        team.solved.end()) {
+    if (team.solved[sub.problem_idx]) {
       continue;
     }
 
     if (sub.stat == "Accepted") {
+      temp_set.erase({current_team_name, team_map[current_team_name].data_idx});
       int problem_penalty_time =
           CalculateProblemTime(sub.problem_idx, team.team_submission);
       team.penalty_time += problem_penalty_time;
-      team.team_time.insert(problem_penalty_time);
-      team.solved.push_back(sub.problem_idx);
+      team.team_time.push_back(sub.time);
+      team.solved[sub.problem_idx] = true;
 
       std::vector<std::string> prev_team_rank = team_rank;
-      Flush();
-      int new_rank =
-          find(team_rank.begin(), team_rank.end(), prev_team_rank[idx]) -
-          team_rank.begin();
+      team_rank.clear();
+      temp_set.insert({current_team_name, team_map[current_team_name].data_idx});
 
-      if (new_rank != idx) {
-        std::cout << prev_team_rank[idx] << " " << prev_team_rank[new_rank]
-                  << " " << team.solved.size() << " " << team.penalty_time
-                  << "\n";
+      int new_rank = -1;
+
+      for (const auto &team : temp_set) {
+        team_rank.push_back(team.name);
+        if (team.name == current_team_name) {
+          new_rank = team_rank.size() - 1;
+        }
+      }
+
+      if (new_rank != idx && new_rank != -1) {
+        std::cout << current_team_name << " " << prev_team_rank[new_rank] << " "
+                  << team.solved.count() << " " << team.penalty_time << "\n";
       }
     } else {
       team.wrong_submission[sub.problem_idx]++;
@@ -360,7 +371,7 @@ int main() {
   std::cin.tie(NULL);
   std::cout.tie(NULL);
 
-  freopen("pressure_data/big.in", "r", stdin);
+  freopen("pressure_data/bigger.in", "r", stdin);
   freopen("output.txt", "w", stdout);
 
   std::string op;
