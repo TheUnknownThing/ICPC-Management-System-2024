@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <bitset>
 #include <chrono>
+#include <cstring>
 #include <iostream>
 #include <set>
 #include <string>
@@ -79,6 +80,7 @@ struct Team_Data {
 std::vector<Team_Data> team_data;
 std::unordered_map<std::string, Team_Info> team_map;
 std::vector<std::string> team_rank;
+std::vector<std::string> new_team_rank;
 bool isStarted = false;
 bool isFrozen = false;
 int problem_num, duration;
@@ -150,71 +152,70 @@ void AddTeamTime(const std::string &team_name, int time) {
 }
 
 void PrintScoreboard() {
-    std::vector<size_t> data_indices;
-    data_indices.reserve(team_rank.size());
-    for (const auto& team : team_rank) {
-        data_indices.push_back(team_map[team].data_idx);
-    }
+  std::vector<size_t> data_indices;
+  data_indices.reserve(team_rank.size());
+  for (const auto &team : team_rank) {
+    data_indices.push_back(team_map[team].data_idx);
+  }
 
-    for (int i = 0; i < team_rank.size(); i++) {
-        const size_t data_idx = data_indices[i];
-        const auto& team_info = team_data[data_idx];
+  for (int i = 0; i < team_rank.size(); i++) {
+    const size_t data_idx = data_indices[i];
+    const auto &team_info = team_data[data_idx];
 
-        std::cout << team_rank[i] << " " << i + 1 << " "
-                 << team_info.solved.count()
-                 << " " << team_info.penalty_time
-                 << " ";
+    std::cout << team_rank[i] << " " << i + 1 << " " << team_info.solved.count()
+              << " " << team_info.penalty_time << " ";
 
-        for (int j = 0; j < problem_num; j++) {
-            bool isSolved = team_info.solved[j];
-            
-            if (team_info.wrong_submission[j] == 0 && 
-                !isSolved && 
-                !team_info.frozen_attempt[j] != 0) {
-                std::cout << ". ";
-                continue;
-            }
+    for (int j = 0; j < problem_num; j++) {
+      bool isSolved = team_info.solved[j];
 
-            if (isSolved) {
-                if (team_info.wrong_submission[j] == 0) {
-                    std::cout << "+ ";
-                } else {
-                    std::cout << "+" << team_info.wrong_submission[j] << " ";
-                }
-            } else {
-                if (isFrozen) {
-                    if (team_info.wrong_submission[j] == 0) {
-                        std::cout << "0/" << team_info.frozen_attempt[j] << " ";
-                    } else if (team_info.frozen_attempt[j] == 0) {
-                        std::cout << "-" << team_info.wrong_submission[j] << " ";
-                    } else {
-                        std::cout << "-" << team_info.wrong_submission[j] 
-                                 << "/" << team_info.frozen_attempt[j] << " ";
-                    }
-                } else {
-                    if (isSolved) {
-                        std::cout << "+" << team_info.wrong_submission[j] << " ";
-                    } else {
-                        if (team_info.wrong_submission[j] == 0) {
-                            std::cout << "0 ";
-                        } else {
-                            std::cout << "-" << team_info.wrong_submission[j] << " ";
-                        }
-                    }
-                }
-            }
+      if (team_info.wrong_submission[j] == 0 && !isSolved &&
+          !team_info.frozen_attempt[j] != 0) {
+        std::cout << ". ";
+        continue;
+      }
+
+      if (isSolved) {
+        if (team_info.wrong_submission[j] == 0) {
+          std::cout << "+ ";
+        } else {
+          std::cout << "+" << team_info.wrong_submission[j] << " ";
         }
-        std::cout << "\n";
+      } else {
+        if (isFrozen) {
+          if (team_info.wrong_submission[j] == 0) {
+            std::cout << "0/" << team_info.frozen_attempt[j] << " ";
+          } else if (team_info.frozen_attempt[j] == 0) {
+            std::cout << "-" << team_info.wrong_submission[j] << " ";
+          } else {
+            std::cout << "-" << team_info.wrong_submission[j] << "/"
+                      << team_info.frozen_attempt[j] << " ";
+          }
+        } else {
+          if (isSolved) {
+            std::cout << "+" << team_info.wrong_submission[j] << " ";
+          } else {
+            if (team_info.wrong_submission[j] == 0) {
+              std::cout << "0 ";
+            } else {
+              std::cout << "-" << team_info.wrong_submission[j] << " ";
+            }
+          }
+        }
+      }
     }
+    std::cout << "\n";
+  }
 }
 
 void Flush() {
   if (!need_flush) {
     return;
   }
-  team_rank.clear();
+
+  size_t idx = 0;
   for (const auto &team : team_set) {
-    team_rank.push_back(team.name);
+    team_rank[idx] = team.name;
+    ++idx;
   }
   need_flush = false;
 }
@@ -270,9 +271,7 @@ void Scroll() {
   }
 
   std::cout << "[Info]Scroll scoreboard.\n";
-
   Flush();
-
   PrintScoreboard();
 
   int idx = team_rank.size() - 1;
@@ -302,34 +301,34 @@ void Scroll() {
       AddTeamTime(current_team_name, sub.time);
       team.solved[sub.problem_idx] = true;
 
-      std::vector<std::string> prev_team_rank = team_rank;
-      team_rank.clear();
       team_set.insert(
           {current_team_name, team_map[current_team_name].data_idx});
 
       int new_rank = -1;
 
+      new_team_rank.clear();
       for (const auto &team : team_set) {
-        team_rank.push_back(team.name);
+        new_team_rank.push_back(team.name);
         if (team.name == current_team_name) {
-          new_rank = team_rank.size() - 1;
+          new_rank = new_team_rank.size() - 1;
         }
       }
 
+      team_rank.swap(new_team_rank);
+
       if (new_rank != idx && new_rank != -1) {
-        std::cout << current_team_name << " " << prev_team_rank[new_rank] << " "
+        std::cout << current_team_name << " " << new_team_rank[new_rank] << " "
                   << team.solved.count() << " " << team.penalty_time << "\n";
       }
     } else {
-      team.wrong_submission[sub.problem_idx]++;
+      ++team.wrong_submission[sub.problem_idx];
     }
   }
-  // clear frozen attempt
+
   for (auto &team : team_data) {
-    for (int i = 0; i < problem_num; i++) {
-      team.frozen_attempt[i] = 0;
-    }
+    memset(team.frozen_attempt, 0, sizeof(team.frozen_attempt));
   }
+
   isFrozen = false;
   PrintScoreboard();
   need_flush = false;
@@ -395,8 +394,8 @@ int main() {
   timer.start();
 
   std::ios::sync_with_stdio(false);
-  std::cin.tie(NULL);
-  std::cout.tie(NULL);
+  std::cin.tie(nullptr);
+  std::cout.tie(nullptr);
 
   freopen("pressure_data/bigger.in", "r", stdin);
   freopen("output.txt", "w", stdout);
@@ -430,12 +429,13 @@ int main() {
 
         // flush
         team_set.clear();
-        team_rank.clear();
         for (const auto &team : team_map) {
           team_set.insert({team.first, team.second.data_idx});
         }
-        
+
         team_rank.clear();
+        team_rank.reserve(team_rank.size() + 100);
+        new_team_rank.reserve(team_rank.size() + 100);
         for (const auto &team : team_set) {
           team_rank.push_back(team.name);
         }
