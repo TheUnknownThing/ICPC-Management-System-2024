@@ -2,3 +2,4 @@ main
 output.txt
 .out
 callgrind.out.*
+/.vscode
