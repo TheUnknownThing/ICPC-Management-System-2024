@@ -439,7 +439,7 @@ int main() {
   std::cin.tie(nullptr);
   std::cout.tie(nullptr);
 
-  freopen("data/3.in", "r", stdin);
+  freopen("pressure_data/big.in", "r", stdin);
   freopen("output.txt", "w", stdout);
 
   std::string op;
